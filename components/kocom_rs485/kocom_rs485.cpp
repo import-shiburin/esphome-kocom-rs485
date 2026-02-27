@@ -16,9 +16,9 @@ void KocomRS485::set_plug_count(uint8_t room, uint8_t count) {
   if (room < NUM_ROOMS) plug_count_[room] = count;
 }
 
-void KocomRS485::register_light_output(uint8_t room, uint8_t sub, output::BinaryOutput *out) {
+void KocomRS485::register_light(uint8_t room, uint8_t sub, light::LightState *light) {
   if (room < NUM_ROOMS && sub < MAX_SUB)
-    light_outputs_[room][sub] = out;
+    light_entities_[room][sub] = light;
 }
 
 // --- Component lifecycle ---
@@ -73,6 +73,7 @@ bool KocomRS485::get_light(uint8_t room, uint8_t sub) {
 }
 
 void KocomRS485::set_light(uint8_t room, uint8_t sub, bool on) {
+  if (!first_poll_done_) return;
   if (room >= NUM_ROOMS || sub >= MAX_SUB) return;
   uint8_t value[8]{};
   for (uint8_t i = 0; i < light_count_[room] && i < MAX_SUB; i++) {
@@ -89,6 +90,7 @@ bool KocomRS485::get_plug(uint8_t room, uint8_t sub) {
 }
 
 void KocomRS485::set_plug(uint8_t room, uint8_t sub, bool on) {
+  if (!first_poll_done_) return;
   if (room >= NUM_ROOMS || sub >= MAX_SUB) return;
   uint8_t value[8]{};
   for (uint8_t i = 0; i < plug_count_[room] && i < MAX_SUB; i++) {
@@ -115,6 +117,7 @@ uint8_t KocomRS485::get_thermo_current(uint8_t room) {
 }
 
 void KocomRS485::set_thermostat(uint8_t room, uint8_t mode, uint8_t target_temp) {
+  if (!first_poll_done_) return;
   if (room >= NUM_THERMO_ROOMS) return;
   uint8_t value[8]{};
   if (mode == 1) {        // heat
@@ -182,7 +185,10 @@ void KocomRS485::run_poll(uint32_t now) {
   if (poll_index_ >= list.size()) {
     poll_index_ = 0;
     last_poll_ms_ = now;
-    first_poll_done_ = true;
+    if (!first_poll_done_) {
+      first_poll_done_ = true;
+      ESP_LOGI(TAG, "Initial poll complete, ready for commands");
+    }
     return;
   }
 
@@ -342,8 +348,13 @@ void KocomRS485::process_packet(const uint8_t *pkt) {
 void KocomRS485::push_light_states(uint8_t room) {
   suppress_write_ = true;
   for (uint8_t i = 0; i < light_count_[room] && i < MAX_SUB; i++) {
-    if (light_outputs_[room][i] != nullptr) {
-      light_outputs_[room][i]->set_state(light_state_[room][i]);
+    if (light_entities_[room][i] != nullptr) {
+      bool current_on = light_entities_[room][i]->current_values.is_on();
+      if (current_on != light_state_[room][i]) {
+        auto call = light_entities_[room][i]->make_call();
+        call.set_state(light_state_[room][i]);
+        call.perform();
+      }
     }
   }
   suppress_write_ = false;

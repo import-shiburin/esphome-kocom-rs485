@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
-#include "esphome/components/output/binary_output.h"
+#include "esphome/components/light/light_state.h"
 #include <vector>
 #include <deque>
 
@@ -52,13 +52,13 @@ class KocomRS485 : public Component, public uart::UARTDevice {
   uint8_t light_count_[NUM_ROOMS]{};
   uint8_t plug_count_[NUM_ROOMS]{};
 
-  // Output pointers for pushing light state back to HA
-  output::BinaryOutput *light_outputs_[NUM_ROOMS][MAX_SUB]{};
+  // Light entity pointers for pushing state back to HA
+  light::LightState *light_entities_[NUM_ROOMS][MAX_SUB]{};
   bool suppress_write_ = false;
 
   void set_light_count(uint8_t room, uint8_t count);
   void set_plug_count(uint8_t room, uint8_t count);
-  void register_light_output(uint8_t room, uint8_t sub, output::BinaryOutput *out);
+  void register_light(uint8_t room, uint8_t sub, light::LightState *light);
 
   float get_setup_priority() const override;
   void setup() override;
