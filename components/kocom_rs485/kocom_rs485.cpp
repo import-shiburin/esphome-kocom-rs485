@@ -389,7 +389,7 @@ void KocomRS485::process_packet(const uint8_t *pkt) {
     return;
   }
 
-  // Elevator uses cmd=01 (ON) and has special addressing — handle before generic cmd check
+  // Elevator accepts any cmd (STATE=0x00 and ON=0x01 both carry status)
   if (device_code == DEV_ELEVATOR) {
     handle_elevator(cmd, value);
     return;
@@ -505,31 +505,32 @@ void KocomRS485::push_fan_state() {
 // --- Elevator ---
 
 void KocomRS485::handle_elevator(uint8_t cmd, const uint8_t *value) {
-  if (cmd == CMD_ON) {
-    if (value[0] != 0x00) {
-      // Phase 2: elevator has arrived (cmd=01, value[0]=03)
-      if (!elevator_arrived_) {
-        elevator_arrived_ = true;
-        elevator_arrived_ms_ = millis();
-        if (elevator_arrived_sensor_ != nullptr)
-          elevator_arrived_sensor_->publish_state(true);
-        ESP_LOGI(TAG, "Elevator arrived (val[0]=%02X)", value[0]);
-      }
-      elevator_called_ = false;
-    } else {
-      // Elevator call detected on bus (our echo or physical wallpad call)
-      if (!elevator_called_) {
-        elevator_called_ = true;
-        elevator_called_ms_ = millis();
-        ESP_LOGI(TAG, "Elevator call detected on bus");
-      }
+  // value[0] = direction: 0x00=idle, 0x01=down, 0x02=up, 0x03=arrival
+  uint8_t direction = value[0];
+
+  if (direction == 0x03) {
+    // Elevator has arrived
+    if (!elevator_arrived_) {
+      elevator_arrived_ = true;
+      elevator_arrived_ms_ = millis();
+      if (elevator_arrived_sensor_ != nullptr)
+        elevator_arrived_sensor_->publish_state(true);
+      ESP_LOGI(TAG, "Elevator arrived (cmd=%02X)", cmd);
     }
-  } else if (cmd == CMD_STATE && value[0] != 0x00) {
-    // Phase 1: elevator approaching (cmd=00, value[0]=03)
-    ESP_LOGI(TAG, "Elevator approaching (val[0]=%02X)", value[0]);
+    elevator_called_ = false;
+  } else if (direction == 0x01 || direction == 0x02) {
+    // Elevator is moving (down or up)
+    ESP_LOGI(TAG, "Elevator moving %s (cmd=%02X)", direction == 0x01 ? "down" : "up", cmd);
     if (!elevator_called_) {
       elevator_called_ = true;
       elevator_called_ms_ = millis();
+    }
+  } else if (direction == 0x00 && cmd == CMD_ON) {
+    // Call echo on bus (cmd=01, direction=idle)
+    if (!elevator_called_) {
+      elevator_called_ = true;
+      elevator_called_ms_ = millis();
+      ESP_LOGI(TAG, "Elevator call detected on bus");
     }
   }
 }
