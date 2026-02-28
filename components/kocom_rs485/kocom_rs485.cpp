@@ -26,6 +26,8 @@ void KocomRS485::register_climate(uint8_t room, climate::Climate *c) {
     climate_entities_[room] = c;
 }
 
+void KocomRS485::register_fan(fan::Fan *f) { fan_entity_ = f; }
+
 // --- Component lifecycle ---
 
 float KocomRS485::get_setup_priority() const { return setup_priority::DATA; }
@@ -148,6 +150,18 @@ void KocomRS485::set_thermostat(uint8_t room, uint8_t mode, uint8_t target_temp)
   send_command(DEV_THERMOSTAT, room_code, CMD_STATE, value);
 }
 
+void KocomRS485::set_fan(bool on, uint8_t speed) {
+  if (!first_poll_done_) return;
+  uint8_t value[8]{};
+  if (on) {
+    value[0] = 0x11;
+    value[1] = 0x01;
+    static const uint8_t speed_map[] = {0x00, 0x40, 0x80, 0xC0};
+    value[2] = (speed >= 1 && speed <= 3) ? speed_map[speed] : 0x40;
+  }
+  send_command(DEV_FAN, 0x00, CMD_STATE, value);
+}
+
 // --- Room code mappings ---
 
 uint8_t KocomRS485::light_plug_room_code(uint8_t room_idx) {
@@ -191,6 +205,8 @@ std::vector<KocomRS485::PollItem> KocomRS485::get_poll_list() {
   for (uint8_t r = 0; r < NUM_THERMO_ROOMS; r++) {
     list.push_back({DEV_THERMOSTAT, thermo_room_code(r)});
   }
+  if (fan_entity_ != nullptr)
+    list.push_back({DEV_FAN, 0x00});
   return list;
 }
 
@@ -421,6 +437,16 @@ void KocomRS485::process_packet(const uint8_t *pkt) {
     ESP_LOGD(TAG, "Thermo room %d: mode=%d target=%d current=%d",
              ri, thermo_state_[ri].mode, thermo_state_[ri].target_temp, thermo_state_[ri].current_temp);
     push_climate_states(ri);
+  } else if (device_code == DEV_FAN) {
+    fan_state_.on = (value[0] == 0x11);
+    switch (value[2]) {
+      case 0x40: fan_state_.speed = 1; break;
+      case 0x80: fan_state_.speed = 2; break;
+      case 0xC0: fan_state_.speed = 3; break;
+      default:   fan_state_.speed = 0; break;
+    }
+    ESP_LOGD(TAG, "Fan: on=%d speed=%d", fan_state_.on, fan_state_.speed);
+    push_fan_state();
   }
 }
 
@@ -465,6 +491,13 @@ void KocomRS485::push_climate_states(uint8_t room) {
   }
 
   c->publish_state();
+}
+
+void KocomRS485::push_fan_state() {
+  if (fan_entity_ == nullptr) return;
+  fan_entity_->state = fan_state_.on;
+  fan_entity_->speed = fan_state_.on ? fan_state_.speed : 0;
+  fan_entity_->publish_state();
 }
 
 // --- Elevator ---

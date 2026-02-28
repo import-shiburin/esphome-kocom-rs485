@@ -4,6 +4,7 @@
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/light/light_state.h"
 #include "esphome/components/climate/climate.h"
+#include "esphome/components/fan/fan.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include <vector>
 #include <deque>
@@ -16,6 +17,7 @@ static const uint8_t DEV_WALLPAD    = 0x01;
 static const uint8_t DEV_LIGHT      = 0x0E;
 static const uint8_t DEV_THERMOSTAT = 0x36;
 static const uint8_t DEV_PLUG       = 0x3B;
+static const uint8_t DEV_FAN        = 0x48;
 static const uint8_t DEV_ELEVATOR   = 0x44;
 
 // Commands
@@ -41,6 +43,11 @@ static const uint8_t NUM_ROOMS = 5;
 static const uint8_t MAX_SUB   = 8;
 static const uint8_t NUM_THERMO_ROOMS = 4;
 
+struct FanState {
+  bool on;         // value[0] == 0x11
+  uint8_t speed;   // 1=low, 2=mid, 3=high, 0=off
+};
+
 struct ThermoState {
   uint8_t mode;        // 0=off, 1=heat, 2=fan_only(away)
   uint8_t target_temp;
@@ -53,6 +60,7 @@ class KocomRS485 : public Component, public uart::UARTDevice {
   bool light_state_[NUM_ROOMS][MAX_SUB]{};
   bool plug_state_[NUM_ROOMS][MAX_SUB]{};
   ThermoState thermo_state_[NUM_THERMO_ROOMS]{};
+  FanState fan_state_{};
 
   // Light counts per room, plug counts per room
   uint8_t light_count_[NUM_ROOMS]{};
@@ -65,6 +73,11 @@ class KocomRS485 : public Component, public uart::UARTDevice {
   // Climate entity pointers for pushing state back to HA
   climate::Climate *climate_entities_[NUM_THERMO_ROOMS]{};
   void register_climate(uint8_t room, climate::Climate *c);
+
+  // Fan entity pointer
+  fan::Fan *fan_entity_{nullptr};
+  void register_fan(fan::Fan *f);
+  void set_fan(bool on, uint8_t speed);
 
   // Elevator
   binary_sensor::BinarySensor *elevator_arrived_sensor_{nullptr};
@@ -141,6 +154,7 @@ class KocomRS485 : public Component, public uart::UARTDevice {
   void handle_elevator(uint8_t cmd, const uint8_t *value);
   void push_light_states(uint8_t room);
   void push_climate_states(uint8_t room);
+  void push_fan_state();
   void send_query(uint8_t device_code, uint8_t room_code);
   void send_command(uint8_t device_code, uint8_t room_code, uint8_t cmd, const uint8_t *value);
   void enqueue_packet(uint8_t device_code, uint8_t room_code, uint8_t cmd, const uint8_t *value);

@@ -4,7 +4,7 @@ from esphome.components import uart, light, binary_sensor
 from esphome.const import CONF_ID, CONF_INDEX
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["light", "climate", "binary_sensor"]
+AUTO_LOAD = ["light", "climate", "fan", "binary_sensor"]
 
 kocom_rs485_ns = cg.esphome_ns.namespace("kocom_rs485")
 KocomRS485Component = kocom_rs485_ns.class_(
