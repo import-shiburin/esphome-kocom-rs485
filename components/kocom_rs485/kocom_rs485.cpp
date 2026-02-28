@@ -21,6 +21,11 @@ void KocomRS485::register_light(uint8_t room, uint8_t sub, light::LightState *li
     light_entities_[room][sub] = light;
 }
 
+void KocomRS485::register_climate(uint8_t room, climate::Climate *c) {
+  if (room < NUM_THERMO_ROOMS)
+    climate_entities_[room] = c;
+}
+
 // --- Component lifecycle ---
 
 float KocomRS485::get_setup_priority() const { return setup_priority::DATA; }
@@ -390,6 +395,7 @@ void KocomRS485::process_packet(const uint8_t *pkt) {
     }
     ESP_LOGD(TAG, "Thermo room %d: mode=%d target=%d current=%d",
              ri, thermo_state_[ri].mode, thermo_state_[ri].target_temp, thermo_state_[ri].current_temp);
+    push_climate_states(ri);
   }
 }
 
@@ -406,6 +412,34 @@ void KocomRS485::push_light_states(uint8_t room) {
     }
   }
   suppress_write_ = false;
+}
+
+void KocomRS485::push_climate_states(uint8_t room) {
+  if (room >= NUM_THERMO_ROOMS) return;
+  auto *c = climate_entities_[room];
+  if (c == nullptr) return;
+
+  auto &ts = thermo_state_[room];
+  switch (ts.mode) {
+    case 0: c->mode = climate::CLIMATE_MODE_OFF; break;
+    case 1: c->mode = climate::CLIMATE_MODE_HEAT; break;
+    case 2: c->mode = climate::CLIMATE_MODE_FAN_ONLY; break;
+    default: c->mode = climate::CLIMATE_MODE_OFF; break;
+  }
+  c->current_temperature = ts.current_temp;
+  c->target_temperature = ts.target_temp;
+
+  if (ts.mode == 1 && ts.current_temp < ts.target_temp) {
+    c->action = climate::CLIMATE_ACTION_HEATING;
+  } else if (ts.mode == 1) {
+    c->action = climate::CLIMATE_ACTION_IDLE;
+  } else if (ts.mode == 2) {
+    c->action = climate::CLIMATE_ACTION_FAN;
+  } else {
+    c->action = climate::CLIMATE_ACTION_OFF;
+  }
+
+  c->publish_state();
 }
 
 // --- Packet construction ---

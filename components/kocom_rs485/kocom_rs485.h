@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/light/light_state.h"
+#include "esphome/components/climate/climate.h"
 #include <vector>
 #include <deque>
 
@@ -55,6 +56,10 @@ class KocomRS485 : public Component, public uart::UARTDevice {
   // Light entity pointers for pushing state back to HA
   light::LightState *light_entities_[NUM_ROOMS][MAX_SUB]{};
   bool suppress_write_ = false;
+
+  // Climate entity pointers for pushing state back to HA
+  climate::Climate *climate_entities_[NUM_THERMO_ROOMS]{};
+  void register_climate(uint8_t room, climate::Climate *c);
 
   void set_light_count(uint8_t room, uint8_t count);
   void set_plug_count(uint8_t room, uint8_t count);
@@ -117,6 +122,7 @@ class KocomRS485 : public Component, public uart::UARTDevice {
   void read_uart();
   void process_packet(const uint8_t *pkt);
   void push_light_states(uint8_t room);
+  void push_climate_states(uint8_t room);
   void send_query(uint8_t device_code, uint8_t room_code);
   void send_command(uint8_t device_code, uint8_t room_code, uint8_t cmd, const uint8_t *value);
   void enqueue_packet(uint8_t device_code, uint8_t room_code, uint8_t cmd, const uint8_t *value);
