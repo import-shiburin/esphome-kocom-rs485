@@ -14,9 +14,8 @@ KocomClimate = kocom_rs485_ns.class_(
     "KocomClimate", climate.Climate, cg.Component
 )
 
-CONFIG_SCHEMA = climate.CLIMATE_SCHEMA.extend(
+CONFIG_SCHEMA = climate.climate_schema(KocomClimate).extend(
     {
-        cv.GenerateID(): cv.declare_id(KocomClimate),
         cv.GenerateID(CONF_KOCOM_RS485_ID): cv.use_id(KocomRS485Component),
         cv.Required(CONF_ROOM): cv.int_range(min=0, max=3),
     }
