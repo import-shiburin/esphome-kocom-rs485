@@ -204,6 +204,30 @@ void KocomRS485::run_poll(uint32_t now) {
   }
 }
 
+// --- Unknown (non-Kocom) byte buffer ---
+
+void KocomRS485::unknown_push(uint8_t byte) {
+  if (unknown_pos_ < UNKNOWN_BUF_SIZE) {
+    unknown_buf_[unknown_pos_++] = byte;
+  } else {
+    unknown_flush();
+    unknown_buf_[0] = byte;
+    unknown_pos_ = 1;
+  }
+}
+
+void KocomRS485::unknown_flush() {
+  if (unknown_pos_ == 0) return;
+  // Format hex string: up to 256 bytes = 768 chars (2 hex + space each)
+  char hex[UNKNOWN_BUF_SIZE * 3 + 1];
+  size_t off = 0;
+  for (size_t i = 0; i < unknown_pos_; i++) {
+    off += snprintf(hex + off, sizeof(hex) - off, "%02X ", unknown_buf_[i]);
+  }
+  ESP_LOGW(TAG, "UNKNOWN[%d]: %s", unknown_pos_, hex);
+  unknown_pos_ = 0;
+}
+
 // --- UART read state machine ---
 
 void KocomRS485::read_uart() {
@@ -218,8 +242,11 @@ void KocomRS485::read_uart() {
     switch (rx_state_) {
       case WAIT_SYNC0:
         if (byte == PKT_SYNC0) {
+          unknown_flush();  // flush any accumulated non-Kocom data
           rx_buf_[0] = byte;
           rx_state_ = WAIT_SYNC1;
+        } else {
+          unknown_push(byte);
         }
         break;
       case WAIT_SYNC1:
@@ -228,8 +255,13 @@ void KocomRS485::read_uart() {
           rx_pos_ = 2;
           rx_state_ = READ_BODY;
         } else if (byte == PKT_SYNC0) {
-          // Stay in WAIT_SYNC1
+          // Previous 0xAA was not a sync - push it as unknown
+          unknown_push(PKT_SYNC0);
+          // Stay in WAIT_SYNC1 with this new 0xAA
         } else {
+          // Neither 0x55 nor 0xAA - previous 0xAA + this byte are unknown
+          unknown_push(PKT_SYNC0);
+          unknown_push(byte);
           rx_state_ = WAIT_SYNC0;
         }
         break;
@@ -242,6 +274,8 @@ void KocomRS485::read_uart() {
         break;
     }
   }
+  // Flush any remaining unknown bytes when no more data available
+  unknown_flush();
 }
 
 // --- Packet processing ---
@@ -267,11 +301,17 @@ void KocomRS485::process_packet(const uint8_t *pkt) {
   uint8_t type_hi = pkt[2];
   uint8_t type_lo = pkt[3] >> 4;
 
-  if (type_hi != 0x30) return;
+  if (type_hi != 0x30) {
+    ESP_LOGW(TAG, "UNHANDLED type_hi=%02X (expected 0x30)", type_hi);
+    return;
+  }
 
   bool is_send = (type_lo == 0x0B);
   bool is_ack  = (type_lo == 0x0D);
-  if (!is_send && !is_ack) return;
+  if (!is_send && !is_ack) {
+    ESP_LOGW(TAG, "UNHANDLED type_lo=%01X (expected 0xB or 0xD)", type_lo);
+    return;
+  }
 
   uint8_t dev_a  = pkt[5];
   uint8_t room_a = pkt[6];
@@ -295,7 +335,12 @@ void KocomRS485::process_packet(const uint8_t *pkt) {
            value[0], value[1], value[2], value[3],
            value[4], value[5], value[6], value[7]);
 
-  if (cmd != CMD_STATE) return;
+  if (cmd != CMD_STATE) {
+    ESP_LOGW(TAG, "UNHANDLED cmd=%02X (not STATE) src=%02X/%02X dst=%02X/%02X val=%02X%02X%02X%02X%02X%02X%02X%02X",
+             cmd, src_dev, src_room, dst_dev, dst_room,
+             value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7]);
+    return;
+  }
 
   uint8_t device_code, device_room;
   if (src_dev == DEV_WALLPAD) {
@@ -305,6 +350,9 @@ void KocomRS485::process_packet(const uint8_t *pkt) {
     device_code = src_dev;
     device_room = src_room;
   } else {
+    ESP_LOGW(TAG, "UNHANDLED no wallpad: src=%02X/%02X dst=%02X/%02X cmd=%02X val=%02X%02X%02X%02X%02X%02X%02X%02X",
+             src_dev, src_room, dst_dev, dst_room, cmd,
+             value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7]);
     return;
   }
 

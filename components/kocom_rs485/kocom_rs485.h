@@ -83,6 +83,14 @@ class KocomRS485 : public Component, public uart::UARTDevice {
   uint8_t rx_pos_ = 0;
   bool logged_avail_ = false;
 
+  // Buffer for non-Kocom bytes
+  static const size_t UNKNOWN_BUF_SIZE = 256;
+  uint8_t unknown_buf_[UNKNOWN_BUF_SIZE]{};
+  size_t unknown_pos_ = 0;
+
+  void unknown_push(uint8_t byte);
+  void unknown_flush();
+
   // Command queue
   std::deque<std::vector<uint8_t>> cmd_queue_;
   uint32_t last_send_ms_ = 0;
