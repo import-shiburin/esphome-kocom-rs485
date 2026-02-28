@@ -1,10 +1,10 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import uart, light
+from esphome.components import uart, light, binary_sensor
 from esphome.const import CONF_ID, CONF_INDEX
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["light", "climate"]
+AUTO_LOAD = ["light", "climate", "binary_sensor"]
 
 kocom_rs485_ns = cg.esphome_ns.namespace("kocom_rs485")
 KocomRS485Component = kocom_rs485_ns.class_(
@@ -15,6 +15,7 @@ CONF_ROOMS = "rooms"
 CONF_LIGHT_COUNT = "light_count"
 CONF_LIGHT_IDS = "light_ids"
 CONF_PLUG_COUNT = "plug_count"
+CONF_ELEVATOR_ARRIVED = "elevator_arrived"
 
 ROOM_SCHEMA = cv.Schema(
     {
@@ -32,6 +33,7 @@ CONFIG_SCHEMA = (
         {
             cv.GenerateID(): cv.declare_id(KocomRS485Component),
             cv.Optional(CONF_ROOMS, default=[]): cv.ensure_list(ROOM_SCHEMA),
+            cv.Optional(CONF_ELEVATOR_ARRIVED): binary_sensor.binary_sensor_schema(),
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -52,3 +54,7 @@ async def to_code(config):
         for sub, light_id in enumerate(room.get(CONF_LIGHT_IDS, [])):
             light_var = await cg.get_variable(light_id)
             cg.add(var.register_light(idx, sub, light_var))
+
+    if CONF_ELEVATOR_ARRIVED in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_ELEVATOR_ARRIVED])
+        cg.add(var.register_elevator_arrived(sens))

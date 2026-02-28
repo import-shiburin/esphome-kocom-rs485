@@ -4,6 +4,7 @@
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/light/light_state.h"
 #include "esphome/components/climate/climate.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #include <vector>
 #include <deque>
 
@@ -15,9 +16,11 @@ static const uint8_t DEV_WALLPAD    = 0x01;
 static const uint8_t DEV_LIGHT      = 0x0E;
 static const uint8_t DEV_THERMOSTAT = 0x36;
 static const uint8_t DEV_PLUG       = 0x3B;
+static const uint8_t DEV_ELEVATOR   = 0x44;
 
 // Commands
 static const uint8_t CMD_STATE = 0x00;
+static const uint8_t CMD_ON    = 0x01;
 static const uint8_t CMD_QUERY = 0x3A;
 
 // Packet constants
@@ -30,6 +33,8 @@ static const size_t  PKT_LEN   = 21;
 static const uint32_t MIN_SEND_INTERVAL_MS = 100;
 static const uint32_t POLL_INTERVAL_S      = 300;
 static const uint32_t POLL_SPACING_MS      = 800;
+static const uint32_t ELEVATOR_ARRIVED_TIMEOUT_MS = 30000;
+static const uint32_t ELEVATOR_CALLED_TIMEOUT_MS  = 300000;
 
 // Rooms
 static const uint8_t NUM_ROOMS = 5;
@@ -60,6 +65,18 @@ class KocomRS485 : public Component, public uart::UARTDevice {
   // Climate entity pointers for pushing state back to HA
   climate::Climate *climate_entities_[NUM_THERMO_ROOMS]{};
   void register_climate(uint8_t room, climate::Climate *c);
+
+  // Elevator
+  binary_sensor::BinarySensor *elevator_arrived_sensor_{nullptr};
+  bool elevator_called_{false};
+  bool elevator_arrived_{false};
+  uint32_t elevator_arrived_ms_{0};
+  uint32_t elevator_called_ms_{0};
+
+  void register_elevator_arrived(binary_sensor::BinarySensor *s) { elevator_arrived_sensor_ = s; }
+  void call_elevator();
+  bool is_elevator_called() { return elevator_called_; }
+  void clear_elevator_called() { elevator_called_ = false; }
 
   void set_light_count(uint8_t room, uint8_t count);
   void set_plug_count(uint8_t room, uint8_t count);
@@ -121,6 +138,7 @@ class KocomRS485 : public Component, public uart::UARTDevice {
 
   void read_uart();
   void process_packet(const uint8_t *pkt);
+  void handle_elevator(uint8_t cmd, const uint8_t *value);
   void push_light_states(uint8_t room);
   void push_climate_states(uint8_t room);
   void send_query(uint8_t device_code, uint8_t room_code);

@@ -59,6 +59,17 @@ void KocomRS485::loop() {
   if (!first_poll_done_ || (now - last_poll_ms_ >= POLL_INTERVAL_S * 1000)) {
     run_poll(now);
   }
+
+  // Auto-clear elevator arrived state after timeout
+  if (elevator_arrived_ && (now - elevator_arrived_ms_ >= ELEVATOR_ARRIVED_TIMEOUT_MS)) {
+    elevator_arrived_ = false;
+    if (elevator_arrived_sensor_ != nullptr)
+      elevator_arrived_sensor_->publish_state(false);
+  }
+  // Auto-clear elevator called state after timeout (no arrival received)
+  if (elevator_called_ && (now - elevator_called_ms_ >= ELEVATOR_CALLED_TIMEOUT_MS)) {
+    elevator_called_ = false;
+  }
 }
 
 void KocomRS485::dump_config() {
@@ -347,6 +358,7 @@ void KocomRS485::process_packet(const uint8_t *pkt) {
     return;
   }
 
+  // Determine the non-wallpad device
   uint8_t device_code, device_room;
   if (src_dev == DEV_WALLPAD) {
     device_code = dst_dev;
@@ -357,6 +369,19 @@ void KocomRS485::process_packet(const uint8_t *pkt) {
   } else {
     ESP_LOGW(TAG, "UNHANDLED no wallpad: src=%02X/%02X dst=%02X/%02X cmd=%02X val=%02X%02X%02X%02X%02X%02X%02X%02X",
              src_dev, src_room, dst_dev, dst_room, cmd,
+             value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7]);
+    return;
+  }
+
+  // Elevator uses cmd=01 (ON) and has special addressing — handle before generic cmd check
+  if (device_code == DEV_ELEVATOR) {
+    handle_elevator(cmd, value);
+    return;
+  }
+
+  if (cmd != CMD_STATE) {
+    ESP_LOGW(TAG, "UNHANDLED cmd=%02X (not STATE) src=%02X/%02X dst=%02X/%02X val=%02X%02X%02X%02X%02X%02X%02X%02X",
+             cmd, src_dev, src_room, dst_dev, dst_room,
              value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7]);
     return;
   }
@@ -440,6 +465,67 @@ void KocomRS485::push_climate_states(uint8_t room) {
   }
 
   c->publish_state();
+}
+
+// --- Elevator ---
+
+void KocomRS485::handle_elevator(uint8_t cmd, const uint8_t *value) {
+  if (cmd == CMD_ON) {
+    if (value[0] != 0x00) {
+      // Phase 2: elevator has arrived (cmd=01, value[0]=03)
+      if (!elevator_arrived_) {
+        elevator_arrived_ = true;
+        elevator_arrived_ms_ = millis();
+        if (elevator_arrived_sensor_ != nullptr)
+          elevator_arrived_sensor_->publish_state(true);
+        ESP_LOGI(TAG, "Elevator arrived (val[0]=%02X)", value[0]);
+      }
+      elevator_called_ = false;
+    } else {
+      // Elevator call detected on bus (our echo or physical wallpad call)
+      if (!elevator_called_) {
+        elevator_called_ = true;
+        elevator_called_ms_ = millis();
+        ESP_LOGI(TAG, "Elevator call detected on bus");
+      }
+    }
+  } else if (cmd == CMD_STATE && value[0] != 0x00) {
+    // Phase 1: elevator approaching (cmd=00, value[0]=03)
+    ESP_LOGI(TAG, "Elevator approaching (val[0]=%02X)", value[0]);
+    if (!elevator_called_) {
+      elevator_called_ = true;
+      elevator_called_ms_ = millis();
+    }
+  }
+}
+
+void KocomRS485::call_elevator() {
+  if (!first_poll_done_) return;
+
+  std::vector<uint8_t> pkt(PKT_LEN);
+  pkt[0] = 0xAA;
+  pkt[1] = 0x55;
+  pkt[2] = 0x30;
+  pkt[3] = 0xBC;
+  pkt[4] = 0x00;
+  // Elevator uses REVERSED addressing: PosA = wallpad, PosB = elevator
+  pkt[5] = DEV_WALLPAD;
+  pkt[6] = 0x00;
+  pkt[7] = DEV_ELEVATOR;
+  pkt[8] = 0x00;
+  pkt[9] = CMD_ON;
+  // Value: all zeros (already zero-initialized by vector)
+
+  uint16_t sum = 0;
+  for (int i = 2; i < 18; i++) sum += pkt[i];
+  pkt[18] = (uint8_t)(sum & 0xFF);
+  pkt[19] = 0x0D;
+  pkt[20] = 0x0D;
+
+  elevator_called_ = true;
+  elevator_called_ms_ = millis();
+  cmd_queue_.push_back(std::move(pkt));
+  ESP_LOGI(TAG, "Elevator call queued");
 }
 
 // --- Packet construction ---
