@@ -496,7 +496,9 @@ void KocomRS485::push_climate_states(uint8_t room) {
 void KocomRS485::push_fan_state() {
   if (fan_entity_ == nullptr) return;
   fan_entity_->state = fan_state_.on;
-  fan_entity_->speed = fan_state_.on ? fan_state_.speed : 0;
+  // Keep last active speed visible in HA even when off
+  if (fan_state_.on && fan_state_.speed > 0)
+    fan_entity_->speed = fan_state_.speed;
   fan_entity_->publish_state();
 }
 

@@ -14,6 +14,7 @@ void KocomFan::setup() {
 
 fan::FanTraits KocomFan::get_traits() {
   auto traits = fan::FanTraits();
+  traits.set_speed(true);
   traits.set_supported_speed_count(3);
   return traits;
 }
@@ -29,14 +30,16 @@ void KocomFan::control(const fan::FanCall &call) {
   if (call.get_speed().has_value())
     spd = *call.get_speed();
 
-  // Turning on with no speed defaults to low
+  // Turning on with no speed: use remembered speed, fallback to low
   if (on && spd == 0)
     spd = 1;
 
   parent_->set_fan(on, spd);
 
   this->state = on;
-  this->speed = on ? spd : 0;
+  if (on)
+    this->speed = spd;
+  // When off, keep current speed so it's remembered for next on
   this->publish_state();
 }
 
